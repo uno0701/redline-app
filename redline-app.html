@@ -615,7 +615,9 @@
         // Paired modification — try character-level refinement
         const charDiff = Diff.diffChars(removed, added);
         const totalChars = Math.max(removed.length, added.length);
-        const changedChars = charDiff.reduce((sum, p) => sum + (p.added || p.removed ? p.value.length : 0), 0);
+        let removedChars = 0, addedChars = 0;
+        charDiff.forEach(p => { if (p.removed) removedChars += p.value.length; else if (p.added) addedChars += p.value.length; });
+        const changedChars = Math.max(removedChars, addedChars);
 
         if (changedChars / totalChars <= 0.3) {
           // Small change — render character-level diff
