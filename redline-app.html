@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Redline — Real-Time Text Comparison</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsdiff/5.1.0/diff.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #181a24;
+    --surface-alt: #1e2130;
+    --border: #2a2d3e;
+    --border-hover: #3d4160;
+    --text: #e0e2ef;
+    --text-muted: #8187a8;
+    --text-dim: #565c7e;
+    --accent: #7c8aff;
+    --accent-glow: rgba(124, 138, 255, 0.12);
+    --del-bg: rgba(255, 80, 80, 0.13);
+    --del-text: #ff6b6b;
+    --del-border: rgba(255, 80, 80, 0.25);
+    --ins-bg: rgba(80, 220, 130, 0.10);
+    --ins-text: #50dc82;
+    --ins-border: rgba(80, 220, 130, 0.25);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --font: 'DM Sans', -apple-system, sans-serif;
+    --mono: 'DM Mono', 'Menlo', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Subtle grain overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  .app {
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 32px 28px 60px;
+  }
+
+  /* HEADER */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--del-text), var(--accent));
+    border-radius: 10px;
+    display: grid; place-items: center;
+    font-weight: 700; font-size: 16px; color: #fff;
+    letter-spacing: -0.5px;
+    box-shadow: 0 4px 20px rgba(124, 138, 255, 0.2);
+  }
+
+  .logo h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, var(--text), var(--text-muted));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .logo h1 span {
+    font-weight: 400;
+    color: var(--text-muted);
+    -webkit-text-fill-color: var(--text-muted);
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mode-btn {
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 7px 14px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .mode-btn:hover { border-color: var(--border-hover); color: var(--text); }
+  .mode-btn.active {
+    background: var(--accent-glow);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .swap-btn {
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 7px 14px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .swap-btn:hover { border-color: var(--border-hover); color: var(--text); }
+  .swap-btn svg { transition: transform 0.3s; }
+  .swap-btn:hover svg { transform: rotate(180deg); }
+
+  /* EDITOR PANELS */
+  .editors {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .editor-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .editor-panel:focus-within {
+    border-color: var(--border-hover);
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .panel-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-dim);
+  }
+
+  .panel-label.original { color: var(--del-text); opacity: 0.7; }
+  .panel-label.revised  { color: var(--ins-text); opacity: 0.7; }
+
+  .char-count {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 220px;
+    padding: 16px;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14.5px;
+    line-height: 1.7;
+    resize: vertical;
+  }
+  textarea::placeholder { color: var(--text-dim); }
+
+  /* REDLINE OUTPUT */
+  .output-wrapper {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    animation: fadeUp 0.4s ease;
+  }
+
+  .output-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .output-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--accent);
+    opacity: 0.8;
+  }
+
+  .stats {
+    display: flex;
+    gap: 16px;
+  }
+
+  .stat {
+    font-family: var(--mono);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .stat .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .stat.del-stat .dot { background: var(--del-text); }
+  .stat.del-stat { color: var(--del-text); }
+  .stat.ins-stat .dot { background: var(--ins-text); }
+  .stat.ins-stat { color: var(--ins-text); }
+
+  .output-body {
+    padding: 20px;
+    min-height: 120px;
+    font-size: 14.5px;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  .output-body .placeholder-text {
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  /* Diff spans */
+  .diff-del {
+    background: var(--del-bg);
+    color: var(--del-text);
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 107, 107, 0.5);
+    border-radius: 3px;
+    padding: 1px 3px;
+    margin: 0 1px;
+  }
+
+  .diff-ins {
+    background: var(--ins-bg);
+    color: var(--ins-text);
+    text-decoration: underline;
+    text-decoration-style: solid;
+    text-decoration-color: rgba(80, 220, 130, 0.4);
+    text-underline-offset: 3px;
+    border-radius: 3px;
+    padding: 1px 3px;
+    margin: 0 1px;
+  }
+
+  /* LEGEND */
+  .legend {
+    display: flex;
+    gap: 24px;
+    margin-top: 16px;
+    padding: 0 4px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .legend-sample-del {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: var(--del-bg);
+    color: var(--del-text);
+    text-decoration: line-through;
+  }
+
+  .legend-sample-ins {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: var(--ins-bg);
+    color: var(--ins-text);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  /* ANIMATIONS */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* RESPONSIVE */
+  @media (max-width: 768px) {
+    .app { padding: 20px 16px 40px; }
+    .editors { grid-template-columns: 1fr; }
+    header { flex-direction: column; align-items: flex-start; }
+    .stats { gap: 10px; }
+    .legend { flex-wrap: wrap; gap: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- HEADER -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">R</div>
+      <h1>Redline <span>· text diff</span></h1>
+    </div>
+    <div class="controls">
+      <button class="mode-btn active" data-mode="words" onclick="setMode('words')">Words</button>
+      <button class="mode-btn" data-mode="chars" onclick="setMode('chars')">Characters</button>
+      <button class="mode-btn" data-mode="lines" onclick="setMode('lines')">Lines</button>
+      <button class="swap-btn" onclick="swapTexts()" title="Swap texts">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Swap
+      </button>
+    </div>
+  </header>
+
+  <!-- EDITORS -->
+  <div class="editors">
+    <div class="editor-panel">
+      <div class="panel-header">
+        <span class="panel-label original">Text A · Original</span>
+        <span class="char-count" id="countA">0 chars</span>
+      </div>
+      <textarea id="textA" placeholder="Paste or type the original text here…" spellcheck="false">The quick brown fox jumps over the lazy dog. This sentence is used for testing purposes. It contains all the letters of the alphabet and is widely recognized around the world.</textarea>
+    </div>
+    <div class="editor-panel">
+      <div class="panel-header">
+        <span class="panel-label revised">Text B · Revised</span>
+        <span class="char-count" id="countB">0 chars</span>
+      </div>
+      <textarea id="textB" placeholder="Paste or type the revised text here…" spellcheck="false">The quick red fox leaps over the lazy dog. This phrase is used for demonstration purposes. It contains most of the letters of the alphabet and is widely known around the world.</textarea>
+    </div>
+  </div>
+
+  <!-- OUTPUT -->
+  <div class="output-wrapper">
+    <div class="output-header">
+      <span class="output-label">Redline Output</span>
+      <div class="stats">
+        <span class="stat del-stat"><span class="dot"></span> <span id="delCount">0</span> removed</span>
+        <span class="stat ins-stat"><span class="dot"></span> <span id="insCount">0</span> added</span>
+      </div>
+    </div>
+    <div class="output-body" id="output">
+      <span class="placeholder-text">Start typing to see the redline comparison…</span>
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="legend-item"><span class="legend-sample-del">removed</span> Text deleted from A</div>
+    <div class="legend-item"><span class="legend-sample-ins">added</span> Text added in B</div>
+  </div>
+</div>
+
+<script>
+  const textA = document.getElementById('textA');
+  const textB = document.getElementById('textB');
+  const output = document.getElementById('output');
+  const countA = document.getElementById('countA');
+  const countB = document.getElementById('countB');
+  const delCountEl = document.getElementById('delCount');
+  const insCountEl = document.getElementById('insCount');
+
+  let currentMode = 'words';
+
+  // Diff mode selection
+  function setMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    runDiff();
+  }
+
+  // Swap text A and B
+  function swapTexts() {
+    const tmp = textA.value;
+    textA.value = textB.value;
+    textB.value = tmp;
+    runDiff();
+  }
+
+  // Main diff function
+  function runDiff() {
+    const a = textA.value;
+    const b = textB.value;
+
+    // Update character counts
+    countA.textContent = `${a.length} chars`;
+    countB.textContent = `${b.length} chars`;
+
+    // If both empty, show placeholder
+    if (!a && !b) {
+      output.innerHTML = '<span class="placeholder-text">Start typing to see the redline comparison…</span>';
+      delCountEl.textContent = '0';
+      insCountEl.textContent = '0';
+      return;
+    }
+
+    // Compute diff based on mode
+    let diff;
+    switch (currentMode) {
+      case 'chars':
+        diff = Diff.diffChars(a, b);
+        break;
+      case 'lines':
+        diff = Diff.diffLines(a, b);
+        break;
+      case 'words':
+      default:
+        diff = Diff.diffWords(a, b);
+        break;
+    }
+
+    // Build HTML output and count changes
+    let html = '';
+    let delCount = 0;
+    let insCount = 0;
+
+    diff.forEach(part => {
+      // Escape HTML entities
+      const text = part.value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+      if (part.removed) {
+        html += `<span class="diff-del">${text}</span>`;
+        delCount += part.count || text.split(/\s+/).filter(Boolean).length;
+      } else if (part.added) {
+        html += `<span class="diff-ins">${text}</span>`;
+        insCount += part.count || text.split(/\s+/).filter(Boolean).length;
+      } else {
+        html += text;
+      }
+    });
+
+    output.innerHTML = html;
+    delCountEl.textContent = delCount;
+    insCountEl.textContent = insCount;
+  }
+
+  // Listen for input on both textareas
+  textA.addEventListener('input', runDiff);
+  textB.addEventListener('input', runDiff);
+
+  // Run on load with sample text
+  runDiff();
+</script>
+
+</body>
+</html>
