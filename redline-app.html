@@ -602,8 +602,32 @@
       }
     }
 
+    // Merge pass: bind consecutive changes separated by short equal parts (≤ 4 chars)
+    const merged = [];
+    for (let j = 0; j < groups.length; j++) {
+      if (groups[j].type === 'change') {
+        let removed = groups[j].removed;
+        let added = groups[j].added;
+        // Absorb subsequent equal+change pairs when the equal part is short
+        while (j + 2 < groups.length &&
+               groups[j + 1].type === 'equal' &&
+               groups[j + 1].value.length <= 4 &&
+               groups[j + 2].type === 'change') {
+          // Short equal part goes into both sides (it was in both texts)
+          removed += groups[j + 1].value;
+          added += groups[j + 1].value;
+          j += 2;
+          removed += groups[j].removed;
+          added += groups[j].added;
+        }
+        merged.push({ type: 'change', removed, added });
+      } else {
+        merged.push(groups[j]);
+      }
+    }
+
     // Render each group
-    groups.forEach(group => {
+    merged.forEach(group => {
       if (group.type === 'equal') {
         html += esc(group.value);
         return;
