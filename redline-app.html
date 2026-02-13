@@ -572,28 +572,62 @@
       return;
     }
 
-    const diff = Diff.diffChars(a, b);
+    // Pass 1: word-level diff
+    const wordDiff = Diff.diffWords(a, b);
 
     let html = '';
     let delCount = 0;
     let insCount = 0;
 
-    diff.forEach(part => {
-      const text = part.value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+    const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    for (let i = 0; i < wordDiff.length; i++) {
+      const part = wordDiff[i];
 
       if (part.removed) {
-        html += `<span class="diff-del">${text}</span>`;
-        delCount += part.count || text.length;
+        // Check if next part is an add (paired modification)
+        const next = wordDiff[i + 1];
+        if (next && next.added) {
+          // Pass 2: character-level diff within the paired block
+          const charDiff = Diff.diffChars(part.value, next.value);
+          const totalChars = Math.max(part.value.length, next.value.length);
+          const changedChars = charDiff.reduce((sum, p) => sum + (p.added || p.removed ? p.value.length : 0), 0);
+
+          if (changedChars / totalChars <= 0.3) {
+            // Small change — render character-level diff
+            charDiff.forEach(cp => {
+              const t = esc(cp.value);
+              if (cp.removed) {
+                html += `<span class="diff-del">${t}</span>`;
+                delCount += cp.value.length;
+              } else if (cp.added) {
+                html += `<span class="diff-ins">${t}</span>`;
+                insCount += cp.value.length;
+              } else {
+                html += t;
+              }
+            });
+          } else {
+            // Large change — render word-level
+            html += `<span class="diff-del">${esc(part.value)}</span>`;
+            html += `<span class="diff-ins">${esc(next.value)}</span>`;
+            delCount += part.value.length;
+            insCount += next.value.length;
+          }
+          i++; // skip the paired add
+        } else {
+          // Pure deletion
+          html += `<span class="diff-del">${esc(part.value)}</span>`;
+          delCount += part.value.length;
+        }
       } else if (part.added) {
-        html += `<span class="diff-ins">${text}</span>`;
-        insCount += part.count || text.length;
+        // Pure insertion (not paired with a preceding remove)
+        html += `<span class="diff-ins">${esc(part.value)}</span>`;
+        insCount += part.value.length;
       } else {
-        html += text;
+        html += esc(part.value);
       }
-    });
+    }
 
     rowData.outputBody.innerHTML = html;
     rowData.delCountEl.textContent = delCount;
